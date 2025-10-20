@@ -1,0 +1,76 @@
+name: Windows VM (Persistent)
+
+on:
+  workflow_dispatch:       # manual trigger
+  schedule:
+    - cron: "0 */6 * * *"  # automatic every 6 hours
+
+jobs:
+  windows-vm:
+    runs-on: windows-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      # Restore previous VM/data state
+      - name: Restore saved data
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: windows-vm-data
+          path: C:\data
+
+      # Enable RDP and configure firewall
+      - name: Enable RDP + Firewall
+        run: |
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
+          netsh advfirewall firewall add rule name="RDP" dir=in action=allow protocol=TCP localport=3389
+          Restart-Service -Name TermService -Force
+
+      # Create RDP user (or reuse previous)
+      - name: Create RDP user
+        run: |
+          if (-not (Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue)) {
+            $password = -join ((1..16) | ForEach-Object { ([char[]](33..126) | Get-Random) })
+            $securePass = ConvertTo-SecureString $password -AsPlainText -Force
+            New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires
+            Add-LocalGroupMember -Group "Administrators" -Member "RDP"
+            Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP"
+            echo "RDP_PASSWORD=$password" >> $env:GITHUB_ENV
+          }
+
+      # Optional: install Tailscale
+      - name: Install & Connect Tailscale
+        run: |
+          $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
+          $installer = "$env:TEMP\tailscale.msi"
+          Invoke-WebRequest $tsUrl -OutFile $installer
+          Start-Process msiexec.exe -ArgumentList "/i", "`"$installer`"", "/quiet", "/norestart" -Wait
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-vm-$env:GITHUB_RUN_ID
+          $ip = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+          echo "TAILSCALE_IP=$ip" >> $env:GITHUB_ENV
+
+      # Do your VM/BlueStacks/Android setup here
+      - name: Run VM Tasks
+        run: |
+          # Example: make a folder, simulate saved state
+          mkdir C:\data\example
+          echo "Last run: $(Get-Date)" > C:\data\last_run.txt
+
+      # Save state/artifacts at the end
+      - name: Save session files
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-vm-data
+          path: C:\data
+
+      # Show connection info
+      - name: Show RDP Info
+        run: |
+          Write-Host "`n=== Windows VM ==="
+          Write-Host "Tailscale IP : $env:TAILSCALE_IP"
+          Write-Host "Username     : RDP"
+          Write-Host "Password     : $env:RDP_PASSWORD"
+          Write-Host "======================="
