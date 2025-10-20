@@ -1,0 +1,70 @@
+name: Android x86 (24/7)
+
+on:
+  workflow_dispatch:  # allows manual run
+  schedule:
+    - cron: "0 */6 * * *"  # optional: auto-run every 6 hours
+
+jobs:
+  android-x86:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    env:
+      ANDROID_CONTAINER_NAME: android-x86
+      TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      # ✅ Restore app data from previous runs
+      - name: Restore Android data
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: android-x86-data
+          path: ./android-data
+
+      # Install Docker
+      - name: Setup Docker
+        uses: docker/setup-buildx-action@v3
+
+      # Pull and run Android Docker image
+      - name: Start Android x86 container
+        run: |
+          docker pull budtmo/docker-android-x86-11.0
+          docker run -d --name $ANDROID_CONTAINER_NAME \
+            -v $PWD/android-data:/data \
+            -p 6080:6080 \   # noVNC web interface
+            -p 5555:5555 \   # ADB
+            budtmo/docker-android-x86-11.0
+
+      # Install Tailscale inside the container (optional, for remote access)
+      - name: Install Tailscale in container
+        run: |
+          docker exec $ANDROID_CONTAINER_NAME bash -c "
+            curl -fsSL https://tailscale.com/install.sh | sh
+            tailscale up --authkey=$TAILSCALE_AUTH_KEY --hostname=android-gh-runner
+          "
+
+      # Wait for container to be ready
+      - name: Wait for Android to boot
+        run: |
+          echo "Waiting for Android container to boot..."
+          sleep 60  # adjust if needed
+
+      # Show connection info
+      - name: Show access info
+        run: |
+          echo "Access Android via noVNC: http://localhost:6080"
+          echo "Access Android via ADB: localhost:5555"
+          docker exec $ANDROID_CONTAINER_NAME ip addr show
+
+      # Save persistent data at the end
+      - name: Save Android data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-x86-data
+          path: ./android-data
