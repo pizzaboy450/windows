@@ -7,7 +7,31 @@ jobs:
   secure-rdp:
     runs-on: windows-latest
     timeout-minutes: 3600
+name: Windows VM Persistent Test
 
+on:
+  workflow_dispatch:
+
+jobs:
+  run-windows-vm:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v4
+
+    - name: Start your VM tasks
+      run: |
+        echo "Running my Windows VM script..."
+        mkdir C:\data
+        echo "Hello from VM" > C:\data\hello.txt
+
+    # ✅ Save (upload) artifacts at the end of the run
+    - name: Save files
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-vm-data
+        path: C:\data
     steps:
       - name: Configure Core RDP Settings
         run: |
