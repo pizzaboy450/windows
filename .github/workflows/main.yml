@@ -8,7 +8,8 @@ on:
 jobs:
   rdp:
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes:240
+    
 
     steps:
     - name: Checkout repo
