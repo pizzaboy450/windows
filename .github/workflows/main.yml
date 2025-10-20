@@ -1,18 +1,19 @@
-name: Windows RDP (6 Hours, Persistent)
+name: Windows RDP (24/7 Auto-Restart)
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "0 */6 * * *"    # ⏰ Runs automatically every 6 hours
 
 jobs:
   rdp:
     runs-on: windows-latest
-    timeout-minutes: 360    # ⏱️ 6 hours runtime
+    timeout-minutes: 355
 
     steps:
-      - name: Checkout repository
+      - name: Checkout repo
         uses: actions/checkout@v4
 
-      # ✅ Restore files from previous session
       - name: Restore saved data
         uses: actions/download-artifact@v4
         continue-on-error: true
@@ -20,16 +21,15 @@ jobs:
           name: windows-vm-data
           path: C:\data
 
-      - name: Enable RDP and Firewall
+      - name: Enable RDP + Firewall
         run: |
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
-          netsh advfirewall firewall delete rule name="RDP-Tailscale" > $null 2>&1
-          netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
+          netsh advfirewall firewall add rule name="RDP" dir=in action=allow protocol=TCP localport=3389
           Restart-Service -Name TermService -Force
 
-      - name: Create RDP user with random password
+      - name: Create RDP user
         run: |
           Add-Type -AssemblyName System.Security
           $chars = ([char[]](33..126))
@@ -46,36 +46,31 @@ jobs:
           $path = "$env:TEMP\tailscale.msi"
           Invoke-WebRequest -Uri $url -OutFile $path
           Start-Process msiexec.exe -ArgumentList "/i", "`"$path`"", "/quiet", "/norestart" -Wait
-          Remove-Item $path -Force
-
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-$env:GITHUB_RUN_ID
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-rdp-vm
 
           $ip = $null
-          $tries = 0
-          while (-not $ip -and $tries -lt 10) {
+          for ($i=0; $i -lt 12 -and -not $ip; $i++) {
             $ip = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
             Start-Sleep -Seconds 5
-            $tries++
           }
-          if (-not $ip) { Write-Error "❌ No Tailscale IP found"; exit 1 }
+          if (-not $ip) { Write-Error "No Tailscale IP found" -ErrorAction Stop }
           echo "TAILSCALE_IP=$ip" >> $env:GITHUB_ENV
 
-      - name: Display RDP login info
+      - name: Show connection info
         run: |
-          Write-Host "`n=== RDP CONNECT INFO ==="
+          Write-Host "`n=== Windows RDP ==="
           Write-Host "Tailscale IP : $env:TAILSCALE_IP"
           Write-Host "Username     : RDP"
           Write-Host "Password     : $env:RDP_PASSWORD"
-          Write-Host "==========================="
-          Write-Host "Use Remote Desktop with the Tailscale IP above.`n"
-          Write-Host "Session stays alive for 6 hours."
+          Write-Host "======================="
+          Write-Host "Connect from any device on Tailscale."
+          Write-Host "This VM will auto-restart every 6 hours.`n"
           while ($true) {
-            Write-Host "[$(Get-Date)] VM Active... (Ctrl+C to stop manually)"
+            Write-Host "[$(Get-Date)] VM running..."
             Start-Sleep -Seconds 300
           }
 
-      # ✅ Save changes for next session
-      - name: Save persistent files
+      - name: Save session files
         if: always()
         uses: actions/upload-artifact@v4
         with:
