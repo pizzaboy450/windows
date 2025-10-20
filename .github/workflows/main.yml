@@ -32,6 +32,11 @@ jobs:
       with:
         name: windows-vm-data
         path: C:\data
+            - name: Restore files
+      uses: actions/download-artifact@v4
+      with:
+        name: windows-vm-data
+        path: C:\data
     steps:
       - name: Configure Core RDP Settings
         run: |
