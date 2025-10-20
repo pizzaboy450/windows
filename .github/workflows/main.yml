@@ -1,25 +1,26 @@
-name: Windows RDP with Persistence
+name: Windows RDP (6 Hours, Persistent)
 
 on:
   workflow_dispatch:
 
 jobs:
-  secure-rdp:
+  rdp:
     runs-on: windows-latest
-    timeout-minutes: 10000000000000000
+    timeout-minutes: 360    # ⏱️ 6 hours runtime
+
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ✅ Restore saved data from previous run
-      - name: Restore persistent files
+      # ✅ Restore files from previous session
+      - name: Restore saved data
         uses: actions/download-artifact@v4
         continue-on-error: true
         with:
           name: windows-vm-data
           path: C:\data
 
-      - name: Configure Core RDP Settings
+      - name: Enable RDP and Firewall
         run: |
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
@@ -28,62 +29,52 @@ jobs:
           netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
           Restart-Service -Name TermService -Force
 
-      - name: Create RDP User with Secure Password
+      - name: Create RDP user with random password
         run: |
           Add-Type -AssemblyName System.Security
-          $charSet = @{
-              Upper   = [char[]](65..90)
-              Lower   = [char[]](97..122)
-              Number  = [char[]](48..57)
-              Special = ([char[]](33..47) + [char[]](58..64) + [char[]](91..96) + [char[]](123..126))
-          }
-          $rawPassword = @()
-          $rawPassword += $charSet.Upper | Get-Random -Count 4
-          $rawPassword += $charSet.Lower | Get-Random -Count 4
-          $rawPassword += $charSet.Number | Get-Random -Count 4
-          $rawPassword += $charSet.Special | Get-Random -Count 4
-          $password = -join ($rawPassword | Sort-Object { Get-Random })
+          $chars = ([char[]](33..126))
+          $password = -join ((1..16) | ForEach-Object { Get-Random -InputObject $chars })
           $securePass = ConvertTo-SecureString $password -AsPlainText -Force
           New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires
           Add-LocalGroupMember -Group "Administrators" -Member "RDP"
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP"
           echo "RDP_PASSWORD=$password" >> $env:GITHUB_ENV
 
-      - name: Install Tailscale
+      - name: Install and connect Tailscale
         run: |
-          $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
-          $installerPath = "$env:TEMP\tailscale.msi"
-          Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
-          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
-          Remove-Item $installerPath -Force
+          $url = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
+          $path = "$env:TEMP\tailscale.msi"
+          Invoke-WebRequest -Uri $url -OutFile $path
+          Start-Process msiexec.exe -ArgumentList "/i", "`"$path`"", "/quiet", "/norestart" -Wait
+          Remove-Item $path -Force
 
-      - name: Establish Tailscale Connection
-        run: |
           & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-$env:GITHUB_RUN_ID
-          $tsIP = $null
-          $retries = 0
-          while (-not $tsIP -and $retries -lt 10) {
-              $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
-              Start-Sleep -Seconds 5
-              $retries++
-          }
-          if (-not $tsIP) {
-              Write-Error "Tailscale IP not assigned."
-              exit 1
-          }
-          echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
 
-      - name: Maintain connection
+          $ip = $null
+          $tries = 0
+          while (-not $ip -and $tries -lt 10) {
+            $ip = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+            Start-Sleep -Seconds 5
+            $tries++
+          }
+          if (-not $ip) { Write-Error "❌ No Tailscale IP found"; exit 1 }
+          echo "TAILSCALE_IP=$ip" >> $env:GITHUB_ENV
+
+      - name: Display RDP login info
         run: |
-          Write-Host "Tailscale IP: $env:TAILSCALE_IP"
-          Write-Host "Username: RDP"
-          Write-Host "Password: $env:RDP_PASSWORD"
-          Write-Host "Keep this window open to maintain the VM."
+          Write-Host "`n=== RDP CONNECT INFO ==="
+          Write-Host "Tailscale IP : $env:TAILSCALE_IP"
+          Write-Host "Username     : RDP"
+          Write-Host "Password     : $env:RDP_PASSWORD"
+          Write-Host "==========================="
+          Write-Host "Use Remote Desktop with the Tailscale IP above.`n"
+          Write-Host "Session stays alive for 6 hours."
           while ($true) {
-              Start-Sleep -Seconds 300
+            Write-Host "[$(Get-Date)] VM Active... (Ctrl+C to stop manually)"
+            Start-Sleep -Seconds 300
           }
 
-      # ✅ Save persistent files after session ends
+      # ✅ Save changes for next session
       - name: Save persistent files
         if: always()
         uses: actions/upload-artifact@v4
