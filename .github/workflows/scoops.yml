@@ -58,7 +58,7 @@ jobs:
 
     - name: Install BlueStacks
       run: |
-        $url = "https://cdn3.bluestacks.com/downloads/installer/BluestacksInstaller.exe"
+        $url = "https://www.bluestacks.com/?utm_source=cdn3&utm_medium=waf."
         $path = "$env:TEMP\BluestacksInstaller.exe"
         Invoke-WebRequest -Uri $url -OutFile $path
         Start-Process -FilePath $path -ArgumentList "/silent" -Wait
