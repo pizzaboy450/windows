@@ -52,13 +52,4 @@ jobs:
           Write-Host "================================"
           while ($true) {
             Write-Host "[$(Get-Date)] Running..."
-            Start-Sleep -Seconds 300
-          }
-
-
-
-
-
-
-
-E+ib=~(DTk0o0|JO
+            Start-Sleep -Seconds 
